@@ -11,9 +11,10 @@ Built as a take-home assignment.
 Every Monday at 9 AM it pulls news about five specific competitors — Fractal Analytics, Tredence, Quantiphi, Tiger Analytics, LatentView — plus the broader enterprise-AI market, filters to the trailing seven days, dedupes repeated coverage, and asks Llama 3.3 70B to produce 4–5 takeaways written for leadership. Each takeaway carries a "Why it matters" line and a citation. The digest lands in `#competitor-news`.
 
 Typical run: 16 articles analysed, ~4 seconds end to end.
-<img width="1045" height="635" alt="Screenshot 2026-07-22 at 12 11 33 AM" src="https://github.com/user-attachments/assets/40475ba5-58d6-4784-ace8-47b42fd5172c" />
 
-<img width="1045" height="617" alt="Screenshot 2026-07-22 at 12 15 04 AM" src="https://github.com/user-attachments/assets/9084ca1d-ccd2-4494-a056-22ef26462f11" />
+<img width="1045" height="635" alt="Weekly digest posted to Slack" src="https://github.com/user-attachments/assets/40475ba5-58d6-4784-ace8-47b42fd5172c" />
+
+<img width="1045" height="617" alt="Resolved source list with real article links" src="https://github.com/user-attachments/assets/9084ca1d-ccd2-4494-a056-22ef26462f11" />
 
 ## Pipeline
 
