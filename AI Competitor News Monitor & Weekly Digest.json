@@ -1,0 +1,289 @@
+{
+  "name": "AI Competitor News Monitor & Weekly Digest",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "id": "30f69c8d-345b-487d-bc59-03ede20c5bfd",
+      "name": "Every Monday 9AM",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -560,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=%22Fractal%20Analytics%22%20OR%20%22Tredence%22%20OR%20%22Quantiphi%22%20OR%20%22Tiger%20Analytics%22%20OR%20%22LatentView%22&hl=en-US&gl=US&ceid=US:en",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "acabe5f9-c4a8-4896-92a2-b86e4ab840c9",
+      "name": "Fetch Competitor News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -336,
+        -96
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "https://news.google.com/rss/search?q=%22enterprise%20AI%20adoption%22%20OR%20%22AI%20consulting%22%20OR%20%22marketing%20analytics%22%20when:7d&hl=en-US&gl=US&ceid=US:en",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text"
+            }
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "c6e3f3d5-43a3-4a32-b59b-835a02e13aef",
+      "name": "Fetch Industry News",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -336,
+        112
+      ],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "id": "8a7476e7-6f2a-4393-a34d-8a7340f09373",
+      "name": "Merge Feeds",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        -112,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse RSS from both feeds, filter to last 7 days, dedupe, build LLM prompt.\n// Regexes are built with new RegExp(string) so no slash-escaping can break.\n\nconst MAX_PER_FEED = 8;\nconst SEVEN_DAYS_AGO = Date.now() - 7 * 24 * 60 * 60 * 1000;\n\nconst RE_ITEM = new RegExp('<item>([\\\\s\\\\S]*?)<' + '/item>', 'g');\nconst RE_CDATA_OPEN = new RegExp('<!\\\\[CDATA\\\\[', 'g');\nconst RE_CDATA_CLOSE = new RegExp('\\\\]\\\\]>', 'g');\nconst RE_TAGS = new RegExp('<[^>]+>', 'g');\n\nfunction clean(s) {\n  return (s || '')\n    .replace(RE_CDATA_OPEN, '')\n    .replace(RE_CDATA_CLOSE, '')\n    .replace(RE_TAGS, '')\n    .replace(new RegExp('&amp;', 'g'), '&')\n    .replace(new RegExp('&quot;', 'g'), '\"')\n    .replace(new RegExp('&#39;', 'g'), \"'\")\n    .replace(new RegExp('&lt;', 'g'), '<')\n    .replace(new RegExp('&gt;', 'g'), '>')\n    .trim();\n}\n\nfunction tag(block, name) {\n  const re = new RegExp('<' + name + '[^>]*>([\\\\s\\\\S]*?)<' + '/' + name + '>');\n  const m = block.match(re);\n  return m ? clean(m[1]) : '';\n}\n\nconst feedLabels = ['Competitor News', 'Industry News'];\nconst articles = [];\nconst seen = new Set();\n\n$input.all().forEach((input, feedIndex) => {\n  const xml = input.json.data || '';\n  if (!xml) return; // feed failed or returned nothing - skip gracefully\n\n  const items = xml.match(RE_ITEM) || [];\n  let kept = 0;\n\n  for (const block of items) {\n    if (kept >= MAX_PER_FEED) break;\n\n    const title = tag(block, 'title');\n    const link = tag(block, 'link');\n    const pubDate = tag(block, 'pubDate');\n    const source = tag(block, 'source') || 'Unknown source';\n\n    if (!title || !link) continue;\n\n    const ts = Date.parse(pubDate);\n    if (!isNaN(ts) && ts < SEVEN_DAYS_AGO) continue;\n\n    const key = title.toLowerCase().replace(new RegExp('[^a-z0-9]', 'g'), '').slice(0, 60);\n    if (seen.has(key)) continue;\n    seen.add(key);\n\n    articles.push({\n      id: articles.length + 1,\n      category: feedLabels[feedIndex] || 'News',\n      title: title,\n      link: link,\n      source: source,\n      date: !isNaN(ts) ? new Date(ts).toISOString().slice(0, 10) : 'n/a'\n    });\n    kept++;\n  }\n});\n\nconst articleList = articles\n  .map(a => '[' + a.id + '] (' + a.category + ') ' + a.title + ' - ' + a.source + ', ' + a.date)\n  .join('\\n');\n\nconst prompt = [\n  'You are a competitive-intelligence analyst for FocusKPI, a data science and AI consulting firm.',\n  '',\n  \"Below are this week's numbered headlines about FocusKPI's competitors (Fractal Analytics, Tredence, Quantiphi, Tiger Analytics, LatentView) and the broader enterprise-AI / analytics-consulting market.\",\n  '',\n  \"Produce the 4-5 most strategically relevant takeaways for FocusKPI's leadership.\",\n  '',\n  'STRICT OUTPUT RULES:',\n'- Start each takeaway with the bullet character • followed by a space, then your own analytical headline wrapped in single asterisks, then the citation. Never use an asterisk as the bullet character.',\n'- On the next line write \"Why it matters:\" followed by one or two sentences of original analysis explaining the strategic implication for FocusKPI. Do not simply restate the headline.',\n'- Use SINGLE asterisks for bold (Slack format). Never use double asterisks.',\n'- Cite sources ONLY as the bracketed number of the headline, for example [3]. NEVER write a URL.',\n'- Prioritize competitor funding, acquisitions, product launches, major client wins, and market shifts. Ignore stock-price noise and duplicate coverage.',\n'- If two headlines cover the same underlying event, merge them into one takeaway and cite each number in its own brackets, like [1][4]. Never put multiple numbers inside one bracket.',\n'- No preamble and no closing summary. Output only the bullets.',\n'- If the list below is empty or nothing is noteworthy, reply exactly: No significant competitor or industry news this week.',\n  '',\n  'Headlines:',\n  articleList || '(no articles retrieved this week)'\n].join('\\n');\n\nreturn [{ json: { prompt: prompt, articleCount: articles.length, articles: articles } }];"
+      },
+      "id": "79746179-e6f8-48cd-8590-5c160ce8f0fa",
+      "name": "Parse & Prepare",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        112,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.prompt }}"
+      },
+      "id": "b9c0059e-2593-40f5-9706-797f49b684b0",
+      "name": "AI Summarize",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.5,
+      "position": [
+        336,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": {
+          "temperature": 0.3
+        }
+      },
+      "id": "bc4c40f6-1081-4c07-a25e-755d0f1fd251",
+      "name": "Groq Llama 3.3 70B",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [
+        336,
+        208
+      ],
+      "credentials": {
+        "groqApi": {
+          "id": "kAJZzbBFbd5Tj80y",
+          "name": "Groq account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Wrap the AI summary in a clean Slack-formatted digest.\n// Links are resolved here from real article data, never from the LLM.\n\nconst prep = $('Parse & Prepare').first().json;\nconst articles = prep.articles || [];\nconst count = prep.articleCount || 0;\n\nlet summary = ($json.text || $json.output || '').trim();\n\n// Safety net: convert any double-asterisk bold the model slipped in to Slack single-asterisk\nsummary = summary.replace(new RegExp('\\\\*\\\\*(.+?)\\\\*\\\\*', 'g'), '*$1*');\n\n// Collect which [n] citations the model actually used\nconst matches = summary.match(new RegExp('\\\\[([\\\\d,\\\\s]+)\\\\]', 'g')) || [];\nconst cited = [];\nmatches.forEach(m => {\n  m.slice(1, -1).split(',').forEach(part => {\n    const n = parseInt(part.trim(), 10);\n    if (!isNaN(n) && cited.indexOf(n) === -1) cited.push(n);\n  });\n});\ncited.sort((a, b) => a - b);\n\nconst sources = cited\n  .map(n => articles.find(a => a.id === n))\n  .filter(Boolean)\n  .map(a => '[' + a.id + '] <' + a.link + '|' + a.title.slice(0, 90) + '> - ' + a.source)\n  .join('\\n');\n\nconst today = new Date();\nconst weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);\nconst fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });\n\nconst parts = [\n  ':newspaper: *Weekly Competitor & Industry Digest*',\n  '_' + fmt(weekAgo) + ' - ' + fmt(today) + ' | ' + count + ' articles analyzed_',\n  '',\n  summary,\n  ''\n];\n\nif (sources) {\n  parts.push('*Sources*');\n  parts.push(sources);\n  parts.push('');\n}\n\nparts.push('_Automated with n8n | Google News RSS | Summarized by Llama 3.3 70B (Groq)_');\n\nreturn [{ json: { digest: parts.join('\\n') } }];"
+      },
+      "id": "35c63cc7-dd6b-4776-8181-59817ed535cf",
+      "name": "Format Digest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        544,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "#competitor-news",
+          "mode": "name"
+        },
+        "text": "={{ $json.digest }}",
+        "otherOptions": {
+          "mrkdwn": true,
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "id": "b4caaf0d-6108-4f73-a2f3-340b8b030c1a",
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.2,
+      "position": [
+        768,
+        16
+      ],
+      "webhookId": "c7811283-62b7-4e80-9cc7-4999596278bd",
+      "credentials": {
+        "slackApi": {
+          "id": "i4lzTtqAlPoEALRw",
+          "name": "Slack account 2"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every Monday 9AM": {
+      "main": [
+        [
+          {
+            "node": "Fetch Competitor News",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Industry News",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Competitor News": {
+      "main": [
+        [
+          {
+            "node": "Merge Feeds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Industry News": {
+      "main": [
+        [
+          {
+            "node": "Merge Feeds",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Feeds": {
+      "main": [
+        [
+          {
+            "node": "Parse & Prepare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse & Prepare": {
+      "main": [
+        [
+          {
+            "node": "AI Summarize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Summarize": {
+      "main": [
+        [
+          {
+            "node": "Format Digest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Groq Llama 3.3 70B": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Summarize",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Digest": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false,
+    "timeSavedMode": "fixed",
+    "timezone": "America/New_York",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "versionId": "0d10797b-85a3-4208-b3ef-adb2855e601b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c8a81aa1eb7efdee058d79ceb39be92c87d2ed8a158647363998bef9f17f4660"
+  },
+  "nodeGroups": [],
+  "id": "IC2l3aMGGZNqQWbA",
+  "tags": []
+}
