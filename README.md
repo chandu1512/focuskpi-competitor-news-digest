@@ -2,7 +2,7 @@
 
 An n8n workflow that tracks FocusKPI's named competitors, summarises the week's coverage with an LLM, and posts a digest to Slack every Monday at 9 AM.
 
-Built as a take-home assignment, July 2026. Chandra (Bitu) Darapaneni.
+Built as a take-home assignment.
 
 ---
 
